@@ -10,8 +10,8 @@ This project is an exercise in implementing rootkit functionality with kernel pr
 ## Overview
 
 This assignment consists of two main components: the attack program (`sneaky_process.c`) and the sneaky kernel module (`sneaky_mod.c`). 
--The attack program is a small user-level program that performs several malicious actions
--The sneaky kernel module is responsible for implementing the following subversive actions
+- The attack program is a small user-level program that performs several malicious actions
+- The sneaky kernel module is responsible for implementing the following subversive actions
 
 ## Attack Program: sneaky_process.c
 
